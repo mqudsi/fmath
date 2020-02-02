@@ -1,5 +1,3 @@
-#![allow(bare_trait_objects)]
-
 use std::io::{BufRead, BufReader};
 use std::str::FromStr;
 
@@ -11,11 +9,6 @@ trait FoldOperation: Sized {
     fn finish(&self, acc: Self::StateType) -> Self::NumType;
 }
 
-struct ParseError;
-trait GenericFoldOperation {
-    fn fold(&mut self, input: &str) -> Result<(), ParseError>;
-    fn finish(&self) -> String;
-}
 
 #[derive(Default)]
 struct Sum;
@@ -50,40 +43,28 @@ impl FoldOperation for Avg {
     }
 }
 
-#[derive(Default)]
-struct Sum2 {
-    op: Sum,
-    state: i64,
+enum DispatchedFoldOperation {
+    Sum(<Sum as FoldOperation>::StateType),
+    Avg(<Avg as FoldOperation>::StateType),
 }
 
-impl GenericFoldOperation for Sum2 {
+struct ParseError;
+impl DispatchedFoldOperation {
     fn fold(&mut self, input: &str) -> Result<(), ParseError> {
         let num = input.parse().map_err(|_| ParseError {})?;
-        self.state = self.op.fold(self.state, num);
+        match self {
+            DispatchedFoldOperation::Sum(ref mut state) => *state = Sum{}.fold(*state, num),
+            DispatchedFoldOperation::Avg(ref mut state) => *state = Avg{}.fold(*state, num),
+        }
+
         Ok(())
     }
 
     fn finish(&self) -> String {
-        let result = self.op.finish(self.state);
-        format!("{}", result)
-    }
-}
-
-#[derive(Default)]
-struct Avg2 {
-    op: Avg,
-    state: (u32, i64),
-}
-
-impl GenericFoldOperation for Avg2 {
-    fn fold(&mut self, input: &str) -> Result<(), ParseError> {
-        let num = input.parse().map_err(|_| ParseError {})?;
-        self.state = self.op.fold(self.state, num);
-        Ok(())
-    }
-
-    fn finish(&self) -> String {
-        let result = self.op.finish(self.state);
+        let result = match self {
+            DispatchedFoldOperation::Sum(state) => Sum{}.finish(*state),
+            DispatchedFoldOperation::Avg(state) => Avg{}.finish(*state),
+        };
         format!("{}", result)
     }
 }
@@ -96,11 +77,9 @@ fn main() {
         return;
     }
 
-    let mut sum = Sum2::default();
-    let mut avg = Avg2::default();
-    let op = match args[1].as_ref() {
-        "sum" => &mut sum as &mut GenericFoldOperation,
-        "avg" => &mut avg as &mut GenericFoldOperation,
+    let mut op = match args[1].as_ref() {
+        "sum" => DispatchedFoldOperation::Sum(Default::default()),
+        "avg" => DispatchedFoldOperation::Avg(Default::default()),
         op @ _ => {
             eprintln!("{} is not a valid operation!", op);
             std::process::exit(1);
